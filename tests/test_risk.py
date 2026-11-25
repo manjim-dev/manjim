@@ -92,6 +92,43 @@ class RiskTest(unittest.TestCase):
         self.assertEqual(main(["risk", str(self.f), "--fail-on", "critical"]), EXIT_OK)
         self.assertEqual(main(["risk", str(self.f)]), EXIT_OK)
 
+    def _audit_json(self, findings):
+        a = self.d / "audit.json"
+        a.write_text(json.dumps({"tool": "manjim 0.2.0", "root": "app", "findings": findings}))
+        return a
+
+    def test_from_audit_creates_and_is_idempotent(self):
+        f = [{"check": "MJ001", "title": "Hard-coded secret in file", "path": p} for p in ("a.py", "b.py", "c.py", "d.py")]
+        f.append({"check": "MJ008", "title": "No LICENSE file", "path": "LICENSE"})
+        a = self._audit_json(f)
+        self.assertEqual(main(["risk", str(self.f), "--from-audit", str(a)]), EXIT_OK)
+        doc = json.loads(self.f.read_text())
+        risks = {r["id"]: r for r in doc["assets"][0]["risks"]}
+        self.assertEqual(doc["assets"][0]["id"], "REPO-app")
+        self.assertEqual(sorted(risks), ["MJ001", "MJ008"])
+        self.assertIn("4 finding(s) in a.py, b.py, c.py +1 more", risks["MJ001"]["threat"])
+        self.assertEqual(risk.rating(risks["MJ001"]["likelihood"] * risks["MJ001"]["impact"]), "critical")
+        # user edits a draft, re-run must not overwrite it
+        doc["assets"][0]["risks"][0]["likelihood"] = 1
+        self.f.write_text(json.dumps(doc))
+        before = self.f.read_bytes()
+        self.assertEqual(main(["risk", str(self.f), "--from-audit", str(a)]), EXIT_OK)
+        self.assertEqual(json.loads(before), json.loads(self.f.read_bytes()))
+        self.assertEqual(main(["risk", str(self.f)]), EXIT_OK)  # merged file is a valid register
+
+    def test_from_audit_keeps_existing_assets(self):
+        main(["risk", str(self.f), "--example"])
+        a = self._audit_json([{"check": "MJ003", "title": "No .gitignore at root", "path": ".gitignore"}])
+        main(["risk", str(self.f), "--from-audit", str(a)])
+        ids = [x["id"] for x in json.loads(self.f.read_text())["assets"]]
+        self.assertEqual(ids, ["A1", "A2", "REPO-app"])
+
+    def test_from_audit_rejects_non_audit(self):
+        bad = self.d / "x.json"
+        bad.write_text('{"findings": []}')
+        self.assertEqual(main(["risk", str(self.f), "--from-audit", str(bad)]), EXIT_USAGE)
+        self.assertFalse(self.f.exists())
+
     def test_cli_usage(self):
         self.assertEqual(main(["risk", str(self.d / "missing.json")]), EXIT_USAGE)
         self.f.write_text("{not json")

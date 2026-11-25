@@ -1,8 +1,9 @@
 # Changelog
 
-## 0.2.0 - unreleased
+## 0.2.0 - 2026-11-25
 - `audit --format sarif`: SARIF 2.1.0 for GitHub code scanning (levels, security-severity, ISO/SOC 2 tags).
 - `ignore` in manjim.toml (`CHECK` or `CHECK:glob`): suppressed findings leave the score but stay visible (json `suppressed`, SARIF suppressions).
+- `risk --from-audit`: turn audit json into draft risks (one per failing check) on asset `REPO-<root>`; idempotent, never overwrites edited risks.
 - Self-audit workflow uploads manjim's own findings to code scanning.
 
 ## 0.1.0 - 2026-11-25

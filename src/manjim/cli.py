@@ -64,6 +64,15 @@ def _emit(text: str, out: str | None, note: str) -> None:
 
 def cmd_risk(args: argparse.Namespace) -> int:
     path = Path(args.assets)
+    if args.from_audit:
+        try:
+            aid, added = _risk.merge_audit(path, Path(args.from_audit))
+        except _risk.RiskError as e:
+            print(f"manjim risk: {e}", file=sys.stderr)
+            return EXIT_USAGE
+        print(f"{path}: asset {aid}, added {len(added)} draft risk(s)"
+              + (f": {', '.join(added)}" if added else " (nothing new)"))
+        return EXIT_OK
     if args.example:
         if path.exists():
             print(f"manjim risk: {path} already exists", file=sys.stderr)
@@ -145,6 +154,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--out", help="write register to file (UTF-8, LF)")
     s.add_argument("--fail-on", choices=list(_risk.RATINGS), help="exit 1 if any risk is rated this or worse")
     s.add_argument("--example", action="store_true", help="write a sample assets.json to ASSETS and exit")
+    s.add_argument("--from-audit", metavar="AUDIT_JSON",
+                   help="merge draft risks from `manjim audit --format json` output into ASSETS and exit")
     s.set_defaults(func=cmd_risk)
 
     s = sub.add_parser("seal", help="seal a report (integrity; tamper-evident with --key)")

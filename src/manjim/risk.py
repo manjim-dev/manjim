@@ -48,6 +48,13 @@ EXAMPLE = {
 }
 
 
+# audit check -> default (likelihood, impact) for a draft risk; review before relying on them
+AUDIT_DEFAULTS = {
+    "MJ001": (4, 5), "MJ002": (3, 5), "MJ003": (3, 3), "MJ004": (3, 4),
+    "MJ005": (2, 4), "MJ006": (2, 5), "MJ007": (2, 2), "MJ008": (1, 2),
+}
+
+
 class RiskError(Exception):
     """Invalid input: exit 2."""
 
@@ -235,3 +242,55 @@ def render(doc: dict, rows: list[Row], flags: list[Flag], fmt: str) -> str:
     for f in d["dpdp"]:
         out.append(f"  DPDP {f['section']:<7} {f['asset_id']}  {f['issue']}")
     return "\n".join(out) + "\n"
+
+
+# ---------- audit -> draft risks ----------
+
+def merge_audit(assets_path: Path, audit_path: Path) -> tuple[str, list[str]]:
+    """Add one draft risk per failing audit check to asset REPO-<root>. Existing risks are never changed.
+    Returns (asset_id, added_risk_ids)."""
+    try:
+        audit = json.loads(audit_path.read_bytes())
+    except OSError as e:
+        raise RiskError(f"cannot read {audit_path}: {e.strerror}") from None
+    except ValueError as e:
+        raise RiskError(f"{audit_path} is not valid JSON: {e}") from None
+    if (not isinstance(audit, dict) or not str(audit.get("tool", "")).startswith("manjim ")
+            or not isinstance(audit.get("findings"), list)):
+        raise RiskError(f"{audit_path} is not a manjim audit json (run: manjim audit . --format json --out FILE)")
+
+    doc = load(assets_path) if assets_path.exists() else {"assets": []}
+    root = str(audit.get("root") or "repo")
+    aid = f"REPO-{root}"
+    asset = next((a for a in doc["assets"] if isinstance(a, dict) and a.get("id") == aid), None)
+    if asset is None:
+        asset = {"id": aid, "name": f"Source repository {root}", "owner": "unassigned",
+                 "confidentiality": 2, "integrity": 3, "availability": 2, "personal_data": False, "risks": []}
+        doc["assets"].append(asset)
+    risks = asset.setdefault("risks", [])
+    if not isinstance(risks, list):
+        raise RiskError(f"asset {aid}: risks must be a list")
+    have = {r.get("id") for r in risks if isinstance(r, dict)}
+
+    by_check: dict[str, list[dict]] = {}
+    for f in audit["findings"]:
+        if isinstance(f, dict) and f.get("check") in AUDIT_DEFAULTS:
+            by_check.setdefault(f["check"], []).append(f)
+    added = []
+    for check in sorted(by_check):
+        if check in have:
+            continue
+        fs = by_check[check]
+        paths = sorted({f.get("path", "") for f in fs})
+        where = ", ".join(paths[:3]) + (f" +{len(paths) - 3} more" if len(paths) > 3 else "")
+        lk, im = AUDIT_DEFAULTS[check]
+        risks.append({
+            "id": check,
+            "threat": f"{fs[0].get('title', check)}: {len(fs)} finding(s) in {where}",
+            "likelihood": lk, "impact": im, "controls": [], "treatment": "mitigate",
+            "source": "manjim audit (draft: review likelihood/impact)",
+        })
+        added.append(check)
+    build(doc)  # validate the merged result before writing
+    assets_path.write_bytes((json.dumps(doc, indent=2, ensure_ascii=False) + "\n").encode("utf-8"))
+    return aid, added

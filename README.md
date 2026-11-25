@@ -93,6 +93,15 @@ On Windows, use `--out` instead of `>`: PowerShell redirection writes UTF-16, an
 
 DPDP flags are prompts for review, not legal advice.
 
+### From audit to risk register
+
+```
+manjim audit . --format json --out audit.json
+manjim risk assets.json --from-audit audit.json
+```
+
+This adds one draft risk per failing check (risk id = check id) to an asset named `REPO-<folder>`, with default likelihood and impact (for example, a hard-coded secret starts at 4 x 5 = critical). Review the scores before relying on them. Re-running only adds new checks: risks you have already edited are never overwritten, and suppressed findings are skipped.
+
 ## Seal semantics
 
 `manjim seal FILE` writes a sidecar `FILE.seal` (JSON) and never modifies `FILE`. The digest covers the raw bytes, so CRLF/LF conversion counts as a change.
