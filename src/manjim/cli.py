@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from manjim import __version__
+from manjim import audit as _audit
 from manjim import seal as _seal
 
 # Exit codes (stable contract, documented in README)
@@ -33,6 +34,24 @@ def cmd_init(args: argparse.Namespace) -> int:
     target.write_text(DEFAULT_CONFIG, encoding="utf-8")
     print(f"wrote {target}")
     return EXIT_OK
+
+
+def cmd_audit(args: argparse.Namespace) -> int:
+    root = Path(args.path)
+    try:
+        cfg = _audit.load_config(root) if root.is_dir() else {}
+        rep = _audit.run(root, exclude=cfg.get("exclude"), mask=cfg.get("mask_secrets", True))
+    except _audit.AuditError as e:
+        print(f"manjim audit: {e}", file=sys.stderr)
+        return EXIT_USAGE
+    fail_under = args.fail_under if args.fail_under is not None else (cfg.get("fail_under") or None)
+    text = _audit.render(rep, args.format, fail_under)
+    if args.out:
+        Path(args.out).write_bytes(text.encode("utf-8"))  # UTF-8 + LF on every OS
+        print(f"wrote {args.out} (score {rep.score})")
+    else:
+        sys.stdout.write(text)
+    return EXIT_FINDINGS if fail_under is not None and rep.score < fail_under else EXIT_OK
 
 
 def _key(args: argparse.Namespace) -> bytes | None:
@@ -94,7 +113,8 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("path")
     s.add_argument("--fail-under", type=int, default=None, metavar="SCORE")
     s.add_argument("--format", choices=["text", "json", "md"], default="text")
-    s.set_defaults(func=_todo("audit"))
+    s.add_argument("--out", help="write report to file (UTF-8, LF); use this instead of > on Windows")
+    s.set_defaults(func=cmd_audit)
 
     s = sub.add_parser("risk", help="build a DPDP-aware risk register from assets.json")
     s.add_argument("assets")

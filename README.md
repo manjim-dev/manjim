@@ -7,7 +7,7 @@ Zero-dependency GRC / IT audit CLI for Python 3.11+.
 ```
 pip install manjim
 manjim init
-manjim audit ./project --fail-under 70
+manjim audit ./project --fail-under 70 --format json --out report.json
 manjim risk assets.json
 manjim keygen audit.key
 manjim seal report.json --key audit.key
@@ -16,7 +16,7 @@ manjim verify report.json --key audit.key
 
 If `manjim` is blocked on Windows (Smart App Control / AppLocker), use `python -m manjim` instead.
 
-> Pre-alpha. `init`, `keygen`, `seal`, `verify` work; `audit` and `risk` are in progress.
+> Pre-alpha. Everything except `risk` works.
 
 ## Exit codes
 
@@ -26,6 +26,26 @@ If `manjim` is blocked on Windows (Smart App Control / AppLocker), use `python -
 | 1 | Findings: hygiene score below `--fail-under`, or verify mismatch |
 | 2 | Usage error / missing input |
 | 3 | Command not implemented yet |
+
+## Audit checks
+
+Score starts at 100. Each failing check deducts its weight once (high 20, medium 10, low 5), plus a quarter-weight for each repeat, capped at 2x the weight per check.
+
+| ID | Check | Severity | ISO 27001:2022 | SOC 2 |
+|----|-------|----------|----------------|-------|
+| MJ001 | Hard-coded secret (AWS, GitHub, Slack, private key, `password = "..."`) | high | A.5.17, A.8.24 | CC6.1 |
+| MJ002 | Sensitive file present (`.env`, `*.pem`, `*.key`, `id_rsa`, ...) | high | A.5.17, A.8.12 | CC6.1 |
+| MJ003 | No `.gitignore` | medium | A.8.4 | CC8.1 |
+| MJ004 | `.gitignore` misses `.env` / key files | medium | A.8.4, A.8.12 | CC6.1 |
+| MJ005 | World-writable file (POSIX) | medium | A.8.3 | CC6.1 |
+| MJ006 | CI action pinned to `@main` / `@master` | medium | A.5.21, A.8.30 | CC9.2 |
+| MJ007 | No `SECURITY.md` | low | A.5.24, A.8.8 | CC7.1 |
+| MJ008 | No `LICENSE` | low | A.5.32 | - |
+
+Secrets are masked in output (`mask_secrets = true`). Files over 1 MiB, binaries, `exclude` paths and `*.seal` files are skipped. The `--fail-under` flag overrides `fail_under` in `manjim.toml`.
+Control mappings are indicative evidence pointers, not an audit opinion.
+
+On Windows, use `--out` instead of `>`: PowerShell redirection writes UTF-16, and a sealed report would then fail to verify on other machines.
 
 ## Seal semantics
 
