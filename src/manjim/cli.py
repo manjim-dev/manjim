@@ -24,6 +24,7 @@ frameworks = ["iso27001:2022", "soc2"]
 fail_under = 0
 mask_secrets = true
 exclude = [".git", "node_modules", ".venv", "__pycache__"]
+# ignore = ["MJ008", "MJ001:tests/*"]  # check, or check:path-glob
 """
 
 
@@ -42,7 +43,8 @@ def cmd_audit(args: argparse.Namespace) -> int:
     root = Path(args.path)
     try:
         cfg = _audit.load_config(root) if root.is_dir() else {}
-        rep = _audit.run(root, exclude=cfg.get("exclude"), mask=cfg.get("mask_secrets", True))
+        rep = _audit.run(root, exclude=cfg.get("exclude"), mask=cfg.get("mask_secrets", True),
+                         ignore=_audit.parse_ignore(cfg.get("ignore")))
     except _audit.AuditError as e:
         print(f"manjim audit: {e}", file=sys.stderr)
         return EXIT_USAGE

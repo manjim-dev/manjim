@@ -149,6 +149,31 @@ class AuditTest(unittest.TestCase):
         self.assertEqual(main(["audit", str(self.d), "--format", "sarif", "--out", str(out)]), EXIT_OK)
         self.assertEqual(json.loads(out.read_bytes())["version"], "2.1.0")
 
+    def test_ignore_rules(self):
+        clean_repo(self.d)
+        (self.d / "tests").mkdir()
+        (self.d / "tests" / "t.py").write_text(f'k = "{FAKE_AWS}"\n')
+        (self.d / "app2.py").write_text(f'k = "{FAKE_AWS}"\n')
+        (self.d / "LICENSE").unlink()
+        rep = audit.run(self.d, ignore=audit.parse_ignore(["mj008", "MJ001:tests/*"]))
+        self.assertEqual([(f.check, f.path) for f in rep.findings], [("MJ001", "app2.py")])
+        self.assertEqual([(f.check, f.path) for f in rep.suppressed], [("MJ001", "tests/t.py"), ("MJ008", "LICENSE")])
+        self.assertEqual(rep.score, 80)  # suppressed findings don't count
+        sarif = json.loads(audit.render(rep, "sarif", None))["runs"][0]["results"]
+        self.assertEqual(sum("suppressions" in r for r in sarif), 2)
+        self.assertEqual(len(json.loads(audit.render(rep, "json", None))["suppressed"]), 2)
+
+    def test_ignore_validation(self):
+        for bad in ("MJ008", ["MJ999"], [1]):
+            with self.subTest(bad=bad), self.assertRaises(audit.AuditError):
+                audit.parse_ignore(bad)
+
+    def test_cli_ignore_from_config(self):
+        (self.d / "manjim.toml").write_text('ignore = ["MJ003", "MJ007", "MJ008"]\nfail_under = 100\n')
+        self.assertEqual(main(["audit", str(self.d), "--out", str(self.d / "r.txt")]), EXIT_OK)
+        (self.d / "manjim.toml").write_text('ignore = ["NOPE"]\n')
+        self.assertEqual(main(["audit", str(self.d)]), EXIT_USAGE)
+
     def test_md_format(self):
         text = audit.render(audit.run(self.d), "md", None)
         self.assertIn("| MJ003 |", text)

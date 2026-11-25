@@ -5,6 +5,7 @@ Mappings are indicative evidence pointers, not a certification opinion.
 """
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 import re
@@ -69,6 +70,7 @@ class Finding:
 class Report:
     root: str
     findings: list[Finding] = field(default_factory=list)
+    suppressed: list[Finding] = field(default_factory=list)
     files_scanned: int = 0
 
     @property
@@ -96,6 +98,22 @@ def load_config(root: Path) -> dict:
         raise AuditError(f"bad {p}: {e}") from None
 
 
+def parse_ignore(rules) -> list[tuple[str, str]]:
+    """'MJ008' or 'MJ001:tests/*' -> [(check, glob)]. Glob is matched on the POSIX relative path."""
+    if rules is None:
+        return []
+    if not isinstance(rules, list) or not all(isinstance(r, str) for r in rules):
+        raise AuditError("ignore must be a list of strings like \"MJ008\" or \"MJ001:tests/*\"")
+    out = []
+    for r in rules:
+        check, _, glob = r.strip().partition(":")
+        check = check.upper()
+        if check not in CHECKS:
+            raise AuditError(f"ignore: unknown check {check!r} in {r!r}")
+        out.append((check, glob.strip() or "*"))
+    return out
+
+
 def _mask(s: str) -> str:
     return s[:4] + "*" * min(8, max(0, len(s) - 4))
 
@@ -121,7 +139,8 @@ def _scan_text(rel: str, text: str, mask: bool, out: list[Finding]) -> None:
                 break  # one finding per line
 
 
-def run(root: Path, exclude: list[str] | None = None, mask: bool = True) -> Report:
+def run(root: Path, exclude: list[str] | None = None, mask: bool = True,
+        ignore: list[tuple[str, str]] | None = None) -> Report:
     if not root.is_dir():
         raise AuditError(f"not a directory: {root}")
     excl = set(exclude if exclude is not None else DEFAULT_EXCLUDE)
@@ -175,11 +194,24 @@ def run(root: Path, exclude: list[str] | None = None, mask: bool = True) -> Repo
     if not any((root / n).is_file() for n in ("LICENSE", "LICENSE.md", "LICENSE.txt", "COPYING")):
         rep.findings.append(Finding("MJ008", "LICENSE"))
 
+    if ignore:
+        keep, drop = [], []
+        for f in rep.findings:
+            hit = any(f.check == c and fnmatch.fnmatchcase(f.path, g) for c, g in ignore)
+            (drop if hit else keep).append(f)
+        rep.findings, rep.suppressed = keep, drop
     rep.findings.sort(key=Finding.key)
+    rep.suppressed.sort(key=Finding.key)
     return rep
 
 
 # ---------- rendering ----------
+
+def _fdict(f: Finding) -> dict:
+    c = CHECKS[f.check]
+    return {"check": f.check, "severity": c.severity, "title": c.title, "path": f.path, "line": f.line,
+            "detail": f.detail, "iso27001_2022": list(c.iso27001), "soc2": list(c.soc2)}
+
 
 def to_dict(rep: Report, fail_under: int | None) -> dict:
     return {
@@ -189,11 +221,8 @@ def to_dict(rep: Report, fail_under: int | None) -> dict:
         "fail_under": fail_under,
         "passed": fail_under is None or rep.score >= fail_under,
         "files_scanned": rep.files_scanned,
-        "findings": [{
-            "check": f.check, "severity": CHECKS[f.check].severity, "title": CHECKS[f.check].title,
-            "path": f.path, "line": f.line, "detail": f.detail,
-            "iso27001_2022": list(CHECKS[f.check].iso27001), "soc2": list(CHECKS[f.check].soc2),
-        } for f in rep.findings],
+        "findings": [_fdict(f) for f in rep.findings],
+        "suppressed": [_fdict(f) for f in rep.suppressed],
     }
 
 
@@ -216,7 +245,9 @@ def to_sarif(rep: Report) -> dict:
         },
     } for cid in ids]
     results = []
-    for f in rep.findings:
+    tagged = [(f, False) for f in rep.findings] + [(f, True) for f in rep.suppressed]
+    tagged.sort(key=lambda t: t[0].key())
+    for f, sup in tagged:
         loc = {"artifactLocation": {"uri": f.path, "uriBaseId": "%SRCROOT%"}}
         if f.line:
             loc["region"] = {"startLine": f.line}
@@ -226,6 +257,7 @@ def to_sarif(rep: Report) -> dict:
             "level": SARIF_LEVEL[CHECKS[f.check].severity],
             "message": {"text": CHECKS[f.check].title + (f" ({f.detail})" if f.detail else "")},
             "locations": [{"physicalLocation": loc}],
+            **({"suppressions": [{"kind": "external", "justification": "ignored in manjim.toml"}]} if sup else {}),
         })
     return {
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
@@ -250,7 +282,7 @@ def render(rep: Report, fmt: str, fail_under: int | None) -> str:
     status = "" if fail_under is None else (" PASS" if d["passed"] else f" FAIL (< {fail_under})")
     if fmt == "md":
         out = [f"# manjim audit: {d['root']}", "",
-               f"**Score:** {d['score']}/100{status}  ", f"**Files scanned:** {d['files_scanned']}", ""]
+               f"**Score:** {d['score']}/100{status}  ", f"**Files scanned:** {d['files_scanned']}  ", f"**Suppressed:** {len(d['suppressed'])}", ""]
         if d["findings"]:
             out += ["| Check | Severity | Location | Detail | ISO 27001:2022 | SOC 2 |",
                     "|---|---|---|---|---|---|"]
@@ -263,7 +295,8 @@ def render(rep: Report, fmt: str, fail_under: int | None) -> str:
             out.append("No findings.")
         out += ["", "_Control mappings are indicative evidence pointers, not an audit opinion._"]
         return "\n".join(out) + "\n"
-    out = [f"manjim audit {d['root']}  score {d['score']}/100{status}  ({d['files_scanned']} files)"]
+    sup = f", {len(d['suppressed'])} suppressed" if d["suppressed"] else ""
+    out = [f"manjim audit {d['root']}  score {d['score']}/100{status}  ({d['files_scanned']} files{sup})"]
     for f in d["findings"]:
         loc = f["path"] + (f":{f['line']}" if f["line"] else "")
         ctl = ", ".join(f["iso27001_2022"] + f["soc2"])

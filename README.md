@@ -43,6 +43,14 @@ Score starts at 100. Each failing check deducts its weight once (high 20, medium
 | MJ007 | No `SECURITY.md` | low | A.5.24, A.8.8 | CC7.1 |
 | MJ008 | No `LICENSE` | low | A.5.32 | - |
 
+To accept a known finding, add it to `ignore` in `manjim.toml`:
+
+```toml
+ignore = ["MJ008", "MJ001:tests/fixtures/*"]   # check, or check:path-glob
+```
+
+Suppressed findings don't count toward the score, but they are still reported: as `suppressed` in json, as a count in text and md, and as dismissed alerts in SARIF. An auditor can always see what was waived.
+
 Secrets are masked in output (`mask_secrets = true`). Files over 1 MiB, binaries, `exclude` paths and `*.seal` files are skipped. The `--fail-under` flag overrides `fail_under` in `manjim.toml`.
 Control mappings are indicative evidence pointers, not an audit opinion.
 
