@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 from manjim import __version__
+from manjim import seal as _seal
 
 # Exit codes (stable contract, documented in README)
 EXIT_OK = 0
@@ -31,6 +32,44 @@ def cmd_init(args: argparse.Namespace) -> int:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(DEFAULT_CONFIG, encoding="utf-8")
     print(f"wrote {target}")
+    return EXIT_OK
+
+
+def _key(args: argparse.Namespace) -> bytes | None:
+    return _seal.load_key(Path(args.key)) if args.key else None
+
+
+def cmd_seal(args: argparse.Namespace) -> int:
+    try:
+        out = _seal.seal(Path(args.file), _key(args), Path(args.out) if args.out else None)
+    except _seal.SealError as e:
+        print(f"manjim seal: {e}", file=sys.stderr)
+        return EXIT_USAGE
+    mode = "tamper-evident" if args.key else "integrity-only"
+    print(f"sealed {args.file} -> {out} ({mode})")
+    return EXIT_OK
+
+
+def cmd_verify(args: argparse.Namespace) -> int:
+    try:
+        alg = _seal.verify(Path(args.file), _key(args), Path(args.seal) if args.seal else None)
+    except _seal.SealError as e:
+        print(f"manjim verify: {e}", file=sys.stderr)
+        return EXIT_USAGE
+    except _seal.VerifyFailed as e:
+        print(f"FAIL {e}", file=sys.stderr)
+        return EXIT_FINDINGS
+    print(f"OK {args.file} ({alg})")
+    return EXIT_OK
+
+
+def cmd_keygen(args: argparse.Namespace) -> int:
+    try:
+        _seal.generate_key(Path(args.path), force=args.force)
+    except _seal.SealError as e:
+        print(f"manjim keygen: {e}", file=sys.stderr)
+        return EXIT_USAGE
+    print(f"wrote {args.path} (keep it secret; do not commit)")
     return EXIT_OK
 
 
@@ -65,12 +104,19 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("seal", help="seal a report (integrity; tamper-evident with --key)")
     s.add_argument("file")
     s.add_argument("--key", help="HMAC key file")
-    s.set_defaults(func=_todo("seal"))
+    s.add_argument("--out", help="seal path (default: <file>.seal)")
+    s.set_defaults(func=cmd_seal)
 
     s = sub.add_parser("verify", help="verify a sealed report")
     s.add_argument("file")
     s.add_argument("--key", help="HMAC key file")
-    s.set_defaults(func=_todo("verify"))
+    s.add_argument("--seal", help="seal path (default: <file>.seal)")
+    s.set_defaults(func=cmd_verify)
+
+    s = sub.add_parser("keygen", help="write a random 256-bit HMAC key file")
+    s.add_argument("path", nargs="?", default="audit.key")
+    s.add_argument("--force", action="store_true")
+    s.set_defaults(func=cmd_keygen)
     return p
 
 
