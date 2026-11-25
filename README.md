@@ -11,6 +11,8 @@ manjim seal report.json --key audit.key
 manjim verify report.json --key audit.key
 ```
 
+If `manjim` is blocked on Windows (Smart App Control / AppLocker), use `python -m manjim` instead.
+
 > Pre-alpha. Only `init` works today; `audit`, `risk`, `seal`, `verify` are in progress.
 
 ## Exit codes
