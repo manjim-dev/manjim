@@ -133,7 +133,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("audit", help="audit a path, map findings to ISO 27001:2022 / SOC 2")
     s.add_argument("path")
     s.add_argument("--fail-under", type=int, default=None, metavar="SCORE")
-    s.add_argument("--format", choices=["text", "json", "md"], default="text")
+    s.add_argument("--format", choices=["text", "json", "md", "sarif"], default="text")
     s.add_argument("--out", help="write report to file (UTF-8, LF); use this instead of > on Windows")
     s.set_defaults(func=cmd_audit)
 

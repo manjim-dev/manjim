@@ -46,6 +46,24 @@ Score starts at 100. Each failing check deducts its weight once (high 20, medium
 Secrets are masked in output (`mask_secrets = true`). Files over 1 MiB, binaries, `exclude` paths and `*.seal` files are skipped. The `--fail-under` flag overrides `fail_under` in `manjim.toml`.
 Control mappings are indicative evidence pointers, not an audit opinion.
 
+### GitHub code scanning
+
+`--format sarif` writes SARIF 2.1.0, so findings show up in the repo's **Security → Code scanning** tab:
+
+```yaml
+permissions:
+  security-events: write
+steps:
+  - uses: actions/checkout@v6
+  - run: pipx run manjim audit . --format sarif --out manjim.sarif --fail-under 70
+  - uses: github/codeql-action/upload-sarif@v4
+    if: always()   # upload even when --fail-under fails the step
+    with:
+      sarif_file: manjim.sarif
+```
+
+Code scanning is free for public repos; private repos need GitHub Advanced Security.
+
 On Windows, use `--out` instead of `>`: PowerShell redirection writes UTF-16, and a sealed report would then fail to verify on other machines.
 
 ## Risk register

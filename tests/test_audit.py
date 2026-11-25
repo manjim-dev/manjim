@@ -126,6 +126,29 @@ class AuditTest(unittest.TestCase):
         (self.d / "manjim.toml").write_text("not = = toml")
         self.assertEqual(main(["audit", str(self.d)]), EXIT_USAGE)
 
+    def test_sarif(self):
+        clean_repo(self.d)
+        (self.d / "c.py").write_text(f'x = 1\nk = "{FAKE_AWS}"\n')
+        (self.d / "LICENSE").unlink()
+        doc = json.loads(audit.render(audit.run(self.d), "sarif", None))
+        self.assertEqual(doc["version"], "2.1.0")
+        run = doc["runs"][0]
+        rules = [r["id"] for r in run["tool"]["driver"]["rules"]]
+        self.assertEqual(rules, sorted(audit.CHECKS))
+        by_rule = {r["ruleId"]: r for r in run["results"]}
+        sec = by_rule["MJ001"]
+        self.assertEqual(sec["level"], "error")
+        self.assertEqual(rules[sec["ruleIndex"]], "MJ001")
+        self.assertEqual(sec["locations"][0]["physicalLocation"]["region"], {"startLine": 2})
+        self.assertNotIn("region", by_rule["MJ008"]["locations"][0]["physicalLocation"])
+        self.assertNotIn(FAKE_AWS, json.dumps(doc))
+        self.assertEqual(run["properties"]["score"], 75)
+
+    def test_cli_sarif_out(self):
+        out = self.d / "r.sarif"
+        self.assertEqual(main(["audit", str(self.d), "--format", "sarif", "--out", str(out)]), EXIT_OK)
+        self.assertEqual(json.loads(out.read_bytes())["version"], "2.1.0")
+
     def test_md_format(self):
         text = audit.render(audit.run(self.d), "md", None)
         self.assertIn("| MJ003 |", text)

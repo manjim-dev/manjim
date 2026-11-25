@@ -197,7 +197,53 @@ def to_dict(rep: Report, fail_under: int | None) -> dict:
     }
 
 
+SARIF_LEVEL = {"high": "error", "medium": "warning", "low": "note"}
+SECURITY_SEVERITY = {"high": "8.0", "medium": "5.0", "low": "2.0"}  # GitHub code scanning bands
+
+
+def to_sarif(rep: Report) -> dict:
+    ids = sorted(CHECKS)
+    rules = [{
+        "id": cid,
+        "name": cid,
+        "shortDescription": {"text": CHECKS[cid].title},
+        "helpUri": "https://github.com/manjim-dev/manjim#audit-checks",
+        "defaultConfiguration": {"level": SARIF_LEVEL[CHECKS[cid].severity]},
+        "properties": {
+            "security-severity": SECURITY_SEVERITY[CHECKS[cid].severity],
+            "tags": ["security"] + [f"iso27001:2022/{c}" for c in CHECKS[cid].iso27001]
+                    + [f"soc2/{c}" for c in CHECKS[cid].soc2],
+        },
+    } for cid in ids]
+    results = []
+    for f in rep.findings:
+        loc = {"artifactLocation": {"uri": f.path, "uriBaseId": "%SRCROOT%"}}
+        if f.line:
+            loc["region"] = {"startLine": f.line}
+        results.append({
+            "ruleId": f.check,
+            "ruleIndex": ids.index(f.check),
+            "level": SARIF_LEVEL[CHECKS[f.check].severity],
+            "message": {"text": CHECKS[f.check].title + (f" ({f.detail})" if f.detail else "")},
+            "locations": [{"physicalLocation": loc}],
+        })
+    return {
+        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+        "version": "2.1.0",
+        "runs": [{
+            "tool": {"driver": {
+                "name": "manjim", "version": __version__,
+                "informationUri": "https://github.com/manjim-dev/manjim", "rules": rules,
+            }},
+            "results": results,
+            "properties": {"score": rep.score},
+        }],
+    }
+
+
 def render(rep: Report, fmt: str, fail_under: int | None) -> str:
+    if fmt == "sarif":
+        return json.dumps(to_sarif(rep), indent=2, sort_keys=True) + "\n"
     d = to_dict(rep, fail_under)
     if fmt == "json":
         return json.dumps(d, indent=2, sort_keys=True) + "\n"

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.0 - unreleased
+- `audit --format sarif`: SARIF 2.1.0 for GitHub code scanning (levels, security-severity, ISO/SOC 2 tags).
+- Self-audit workflow uploads manjim's own findings to code scanning.
+
 ## 0.1.0 - 2026-11-25
 - `risk`: risk register from assets.json, 5x5 likelihood x impact scoring, DPDP Act 2023 review flags (s.8(5), 8(6), 8(7), 9, 16), text/json/md/csv, `--fail-on`, `--example`, field-level validation errors.
 - All commands implemented; no more exit-3 stubs.
