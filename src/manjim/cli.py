@@ -2,18 +2,20 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
 from manjim import __version__
 from manjim import audit as _audit
+from manjim import risk as _risk
 from manjim import seal as _seal
 
 # Exit codes (stable contract, documented in README)
 EXIT_OK = 0
 EXIT_FINDINGS = 1      # score below --fail-under / verify mismatch
 EXIT_USAGE = 2         # bad args, missing files
-EXIT_NOT_IMPLEMENTED = 3
+EXIT_NOT_IMPLEMENTED = 3  # reserved for future stubs
 
 CONFIG_NAME = "manjim.toml"  # read back with stdlib tomllib (3.11+)
 DEFAULT_CONFIG = """\
@@ -46,12 +48,38 @@ def cmd_audit(args: argparse.Namespace) -> int:
         return EXIT_USAGE
     fail_under = args.fail_under if args.fail_under is not None else (cfg.get("fail_under") or None)
     text = _audit.render(rep, args.format, fail_under)
-    if args.out:
-        Path(args.out).write_bytes(text.encode("utf-8"))  # UTF-8 + LF on every OS
-        print(f"wrote {args.out} (score {rep.score})")
+    _emit(text, args.out, f"score {rep.score}")
+    return EXIT_FINDINGS if fail_under is not None and rep.score < fail_under else EXIT_OK
+
+
+def _emit(text: str, out: str | None, note: str) -> None:
+    if out:
+        Path(out).write_bytes(text.encode("utf-8"))  # UTF-8 + LF on every OS
+        print(f"wrote {out} ({note})")
     else:
         sys.stdout.write(text)
-    return EXIT_FINDINGS if fail_under is not None and rep.score < fail_under else EXIT_OK
+
+
+def cmd_risk(args: argparse.Namespace) -> int:
+    path = Path(args.assets)
+    if args.example:
+        if path.exists():
+            print(f"manjim risk: {path} already exists", file=sys.stderr)
+            return EXIT_USAGE
+        path.write_bytes((json.dumps(_risk.EXAMPLE, indent=2) + "\n").encode("utf-8"))
+        print(f"wrote example {path}")
+        return EXIT_OK
+    try:
+        doc = _risk.load(path)
+        rows, flags = _risk.build(doc)
+    except _risk.RiskError as e:
+        print(f"manjim risk: {e}", file=sys.stderr)
+        return EXIT_USAGE
+    _emit(_risk.render(doc, rows, flags, args.format), args.out, f"{len(rows)} risks")
+    w = _risk.worst(rows)
+    if args.fail_on and w and _risk.RATINGS.index(w) >= _risk.RATINGS.index(args.fail_on):
+        return EXIT_FINDINGS
+    return EXIT_OK
 
 
 def _key(args: argparse.Namespace) -> bytes | None:
@@ -92,13 +120,6 @@ def cmd_keygen(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def _todo(name: str):
-    def run(_: argparse.Namespace) -> int:
-        print(f"manjim {name}: not implemented yet", file=sys.stderr)
-        return EXIT_NOT_IMPLEMENTED
-    return run
-
-
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="manjim", description=__doc__)
     p.add_argument("--version", action="version", version=f"manjim {__version__}")
@@ -119,7 +140,10 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("risk", help="build a DPDP-aware risk register from assets.json")
     s.add_argument("assets")
     s.add_argument("--format", choices=["text", "json", "md", "csv"], default="text")
-    s.set_defaults(func=_todo("risk"))
+    s.add_argument("--out", help="write register to file (UTF-8, LF)")
+    s.add_argument("--fail-on", choices=list(_risk.RATINGS), help="exit 1 if any risk is rated this or worse")
+    s.add_argument("--example", action="store_true", help="write a sample assets.json to ASSETS and exit")
+    s.set_defaults(func=cmd_risk)
 
     s = sub.add_parser("seal", help="seal a report (integrity; tamper-evident with --key)")
     s.add_argument("file")

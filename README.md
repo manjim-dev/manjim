@@ -8,7 +8,8 @@ Zero-dependency GRC / IT audit CLI for Python 3.11+.
 pip install manjim
 manjim init
 manjim audit ./project --fail-under 70 --format json --out report.json
-manjim risk assets.json
+manjim risk assets.json --example
+manjim risk assets.json --fail-on high --format md --out register.md
 manjim keygen audit.key
 manjim seal report.json --key audit.key
 manjim verify report.json --key audit.key
@@ -16,14 +17,14 @@ manjim verify report.json --key audit.key
 
 If `manjim` is blocked on Windows (Smart App Control / AppLocker), use `python -m manjim` instead.
 
-> Pre-alpha. Everything except `risk` works.
+> Pre-alpha: all commands work, but output formats may still change before 1.0.
 
 ## Exit codes
 
 | Code | Meaning |
 |------|---------|
 | 0 | OK |
-| 1 | Findings: hygiene score below `--fail-under`, or verify mismatch |
+| 1 | Findings: audit score below `--fail-under`, risk at/above `--fail-on`, or verify mismatch |
 | 2 | Usage error / missing input |
 | 3 | Command not implemented yet |
 
@@ -46,6 +47,25 @@ Secrets are masked in output (`mask_secrets = true`). Files over 1 MiB, binaries
 Control mappings are indicative evidence pointers, not an audit opinion.
 
 On Windows, use `--out` instead of `>`: PowerShell redirection writes UTF-16, and a sealed report would then fail to verify on other machines.
+
+## Risk register
+
+`manjim risk assets.json` builds a register from your assets. Run `--example` first to get a starter file.
+
+- Each asset has `id`, `name`, `owner`, C/I/A ratings (1-3), and `risks`: `threat`, `likelihood` (1-5), `impact` (1-5), `controls`, `treatment` (mitigate / accept / transfer / avoid).
+- Score = likelihood x impact: 1-4 low, 5-9 medium, 10-16 high, 20-25 critical. The register is sorted worst first.
+- Output formats: text, json, md, csv. `--fail-on high` exits 1 if any risk is high or worse.
+- If `personal_data: true`, manjim flags review points under India's DPDP Act 2023:
+
+| Section | Raised when |
+|---------|-------------|
+| s.8(5) security safeguards | `encrypted_at_rest` is not `true` |
+| s.8(6) breach intimation | `breach_process` is not `true` |
+| s.8(7) erasure | no `retention_days` |
+| s.9 children's data | `data_categories` includes `children` |
+| s.16 cross-border transfer | `cross_border: true` |
+
+DPDP flags are prompts for review, not legal advice.
 
 ## Seal semantics
 
